@@ -3,11 +3,11 @@ import os
 import re
 import json
 import time
-import base64
 import tempfile
 import pandas as pd
 import asyncio
 from typing import List, Optional
+import requests
 
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +21,6 @@ TAG_MAX_LENGTH = 20
 
 # -------------------- HELPERS --------------------
 def safe_parse_json(text: str):
-    """Parse JSON safely from AI output"""
     try:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
@@ -31,7 +30,6 @@ def safe_parse_json(text: str):
     return {}
 
 def generate_prompt(listing, examples, shop_context, shop_url, optional_keywords_str):
-    """Build the AI prompt"""
     examples_str = ""
     for ex in examples:
         examples_str += f"""
@@ -65,13 +63,11 @@ Rules:
 """
     return prompt
 
-async def call_openai(prompt, image_path=None):
-    """Call OpenAI API with optional base64 image"""
+async def call_openai(prompt, image_url=None):
+    """Call OpenAI API with optional image URL"""
     content = [{"type": "text", "text": prompt}]
-    if image_path:
-        with open(image_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode("utf-8")
-        content.append({"type": "image_data", "image_data": img_b64})
+    if image_url:
+        content.append({"type": "image_url", "image_url": {"url": image_url}})
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -80,11 +76,20 @@ async def call_openai(prompt, image_path=None):
     return safe_parse_json(response.choices[0].message.content)
 
 def build_csv(results):
-    """Save results to a temporary CSV file and return path"""
     temp_dir = tempfile.mkdtemp()
     output_csv = os.path.join(temp_dir, "filled_products.csv")
     pd.DataFrame(results).to_csv(output_csv, index=False)
     return output_csv
+
+def upload_to_fileio(file_path):
+    """Upload a file to file.io and return temporary public URL"""
+    with open(file_path, "rb") as f:
+        response = requests.post("https://file.io", files={"file": f}, data={"expires":"1d"})
+    data = response.json()
+    if data.get("success"):
+        return data["link"]
+    else:
+        raise Exception(f"file.io upload failed: {data}")
 
 # -------------------- FASTAPI SETUP --------------------
 app = FastAPI(title="Etsy Listing Generator")
@@ -103,11 +108,6 @@ class ExampleListing(BaseModel):
     description: str
     tags: List[str]
 
-class ListingInput(BaseModel):
-    sku: str
-    keywords: Optional[str] = ""
-    notes: Optional[str] = ""
-
 # -------------------- ENDPOINT 1: App / FormData --------------------
 @app.post("/generate_listings_app")
 async def generate_listings_app(
@@ -124,12 +124,15 @@ async def generate_listings_app(
 
     for i, listing in enumerate(listings):
         try:
-            # Save image and encode as base64
+            # Save image temporarily
             image_file = images[i]
             temp_dir = tempfile.mkdtemp()
             image_path = os.path.join(temp_dir, image_file.filename)
             with open(image_path, "wb") as f:
                 f.write(await image_file.read())
+
+            # Upload to file.io
+            image_url = upload_to_fileio(image_path)
 
             # Keywords
             raw_keywords = listing.get("keywords", "")
@@ -139,7 +142,7 @@ async def generate_listings_app(
 
             # Prompt & OpenAI
             prompt = generate_prompt(listing, examples, shop_context, shop_url, optional_keywords_str)
-            parsed_output = await call_openai(prompt, image_path=image_path)
+            parsed_output = await call_openai(prompt, image_url=image_url)
 
             # Merge tags
             tags = [t.strip() for t in parsed_output.get("tags", []) if len(t.strip()) <= TAG_MAX_LENGTH]
@@ -195,7 +198,7 @@ async def generate_listings_csv(file: UploadFile = File(...)):
 
             # Use image_url from CSV if provided
             image_url = row.get("image_url","")  # must be public URL
-            parsed_output = await call_openai(prompt, image_path=None if not image_url else None)  # TODO: handle public URL differently
+            parsed_output = await call_openai(prompt, image_url=image_url if image_url else None)
 
             tags = [t.strip() for t in parsed_output.get("tags", []) if len(t.strip()) <= TAG_MAX_LENGTH]
             all_tags = []
