@@ -6,13 +6,12 @@ import time
 import tempfile
 import pandas as pd
 import asyncio
-from typing import List, Optional
+from typing import List
 import requests
 
 from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from openai import OpenAI
 
 # -------------------- CONFIG --------------------
@@ -26,55 +25,29 @@ def safe_parse_json(text: str):
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        print("❌ Failed to parse JSON:", text)
-        return {}
+    except Exception as e:
+        print("❌ Failed to parse JSON:", text, e)
     return {}
 
-def generate_prompt(listing, examples, shop_context, shop_url, optional_keywords_str):
-    """Build prompt for OpenAI"""
-    examples_str = ""
-    for ex in examples:
-        examples_str += f"""
-Example:
-{{
-  "title": "{ex['title']}",
-  "description": "{ex['description']}",
-  "tags": {json.dumps(ex['tags'])}
-}}
-"""
-    prompt = f"""
-You are an expert Etsy SEO copywriter.
-Here are examples of Etsy listings to follow:
-{examples_str}
-
-Now analyze the uploaded image and generate Etsy listing content in JSON format:
-{{
-  "title": "generated title",
-  "description": "generated description",
-  "tags": ["tag1","tag2",...,"tag20"]
-}}
-
-Rules:
-- Product is a printable digital download.
-- Use Optional Keywords exactly: {optional_keywords_str}
-- Additional context: {listing.get('notes', '')}
-- Shop context: {shop_context}
-- Shop URL: {shop_url}
-- Generate 20 tags max, deduplicate, tags <= {TAG_MAX_LENGTH} chars
-- Respond ONLY with valid JSON
-"""
-    return prompt
+def upload_to_fileio(file_path):
+    """Upload a file to file.io and return temporary public URL"""
+    with open(file_path, "rb") as f:
+        resp = requests.post("https://file.io", files={"file": f}, data={"expires":"1d"})
+    print("📤 file.io response:", resp.text)
+    resp.raise_for_status()
+    data = resp.json()
+    if not data.get("success"):
+        raise Exception(f"file.io upload failed: {data}")
+    return data["link"]
 
 async def call_openai(prompt, image_url=None):
-    """Call OpenAI API with optional image URL"""
-    content = [{"type": "text", "text": prompt}]
+    """Call OpenAI API and return parsed JSON"""
+    content = [{"type":"text","text":prompt}]
     if image_url:
-        content.append({"type": "image_url", "image_url": {"url": image_url}})
-
+        content.append({"type":"image_url","image_url":{"url":image_url}})
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": content}]
+        messages=[{"role":"user","content":content}]
     )
     raw_text = response.choices[0].message.content
     print("🟢 OpenAI raw response:", raw_text)
@@ -86,21 +59,8 @@ def build_csv(results):
     pd.DataFrame(results).to_csv(output_csv, index=False)
     return output_csv
 
-def upload_to_fileio(file_path):
-    """Upload a file to file.io and return temporary public URL"""
-    with open(file_path, "rb") as f:
-        resp = requests.post("https://file.io", files={"file": f}, data={"expires":"1d"})
-    print("📤 file.io raw response:", resp.text)
-    if resp.status_code != 200:
-        raise Exception(f"file.io upload failed: {resp.status_code} {resp.text}")
-    data = resp.json()
-    if not data.get("success"):
-        raise Exception(f"file.io upload failed: {data}")
-    return data["link"]
-
 # -------------------- FASTAPI SETUP --------------------
 app = FastAPI(title="Etsy Listing Generator")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -109,23 +69,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -------------------- DATA MODELS --------------------
-class ExampleListing(BaseModel):
-    title: str
-    description: str
-    tags: List[str]
+# Temporary store of CSVs
+csv_store = {}
 
-# -------------------- ENDPOINT 1: App / FormData --------------------
+# -------------------- ENDPOINT --------------------
 @app.post("/generate_listings_app")
 async def generate_listings_app(
     request: str = Form(...),
-    images: List[UploadFile] = File(...),
+    images: List[UploadFile] = File(...)
 ):
+    # Parse JSON from form
     try:
         data = json.loads(request)
-    except json.JSONDecodeError as e:
-        print("❌ Failed to parse request JSON:", request)
-        return {"error": "Invalid JSON in request", "details": str(e)}
+    except Exception as e:
+        print("❌ Failed to parse request JSON:", request, e)
+        return JSONResponse({"error":"Invalid JSON in request", "details": str(e)}, status_code=400)
 
     listings = data.get("listings", [])
     examples = data.get("examples", [])
@@ -137,7 +95,7 @@ async def generate_listings_app(
     for i, listing in enumerate(listings):
         sku = listing.get("sku", f"row_{i}")
         try:
-            # Save image temporarily
+            # Save uploaded image
             image_file = images[i]
             temp_dir = tempfile.mkdtemp()
             image_path = os.path.join(temp_dir, image_file.filename)
@@ -153,23 +111,53 @@ async def generate_listings_app(
                 image_url = None
 
             # Keywords
-            raw_keywords = listing.get("keywords", "")
-            long_keywords_for_ai = [k.strip() for k in raw_keywords.split(",") if len(k.strip()) > TAG_MAX_LENGTH]
-            optional_keywords_str = ", ".join(long_keywords_for_ai)
-            short_keywords_for_tags = [k.strip() for k in raw_keywords.split(",") if len(k.strip()) <= TAG_MAX_LENGTH]
+            raw_keywords = listing.get("keywords","")
+            all_keywords = [k.strip() for k in raw_keywords.split(",") if k.strip()]
+            optional_keywords_for_ai = [k for k in all_keywords if len(k)>TAG_MAX_LENGTH]
+            short_keywords_for_tags = [k for k in all_keywords if len(k)<=TAG_MAX_LENGTH]
+            optional_keywords_str = json.dumps(optional_keywords_for_ai)
 
-            # Prompt & OpenAI
-            prompt = generate_prompt(listing, examples, shop_context, shop_url, optional_keywords_str)
+            # Build examples string
+            examples_str = ""
+            for ex in examples:
+                examples_str += f"""
+Example:
+{{
+  "title": "{ex.get('title','')}",
+  "description": "{ex.get('description','')}",
+  "tags": {json.dumps(ex.get('tags',[]))}
+}}
+"""
+
+            # Build prompt
+            prompt = f"""
+You are an expert Etsy SEO copywriter.
+
+Here are examples of Etsy listings to follow:
+{examples_str}
+
+Now analyze the uploaded image and generate Etsy listing content in JSON format:
+{{
+  "title": "generated title",
+  "description": "generated description",
+  "tags": ["tag1","tag2",...,"tag20"]
+}}
+
+Rules:
+- Product is a printable digital download.
+- Use Optional Keywords exactly: {optional_keywords_str}
+- Additional context: {listing.get('notes','')}
+- Shop context: {shop_context}
+- Shop URL: {shop_url}
+- Generate 20 tags max, deduplicate, tags <= {TAG_MAX_LENGTH} chars
+- Respond ONLY with valid JSON
+"""
             print(f"📝 Prompt for SKU {sku}:\n{prompt[:500]}...")  # first 500 chars
 
-            try:
-                parsed_output = await call_openai(prompt, image_url=image_url)
-            except Exception as e:
-                print(f"⚠️ OpenAI call failed for SKU {sku}: {e}")
-                parsed_output = {}
+            parsed_output = await call_openai(prompt, image_url=image_url)
 
             # Merge tags
-            tags = [t.strip() for t in parsed_output.get("tags", []) if len(t.strip()) <= TAG_MAX_LENGTH]
+            tags = [t.strip() for t in parsed_output.get("tags",[]) if len(t.strip())<=TAG_MAX_LENGTH]
             all_tags = []
             for t in short_keywords_for_tags + tags:
                 if t not in all_tags:
@@ -177,87 +165,42 @@ async def generate_listings_app(
 
             results.append({
                 "SKU": sku,
-                "Title": parsed_output.get("title", ""),
-                "Description": parsed_output.get("description", ""),
-                "Tags": ", ".join(all_tags[:13])
+                "Title": parsed_output.get("title",""),
+                "Description": parsed_output.get("description",""),
+                "Tags": all_tags[:13]  # Etsy max 13
             })
             print(f"✅ Processed SKU {sku}")
-            await asyncio.sleep(2)
+            await asyncio.sleep(2)  # avoid rate limits
 
         except Exception as e:
             print(f"⚠️ Error processing SKU {sku}: {e}")
-            results.append({
-                "SKU": sku,
-                "Title": "",
-                "Description": "",
-                "Tags": ""
-            })
+            results.append({"SKU": sku,"Title":"","Description":"","Tags":[]})
 
-    output_csv = build_csv(results)
-    print(f"✅ CSV generated at: {output_csv}")
-    return FileResponse(output_csv, filename="filled_products.csv")
+    # Save CSV
+    csv_path = build_csv(results)
+    csv_id = str(len(csv_store)+1)
+    csv_store[csv_id] = csv_path
 
-# -------------------- ENDPOINT 2: CSV upload --------------------
-@app.post("/generate_listings_csv")
-async def generate_listings_csv(file: UploadFile = File(...)):
-    df = pd.read_csv(file.file)
-    results = []
+    # Return JSON with results + CSV URL
+    return JSONResponse({
+        "results": results,
+        "csv_url": f"/download_csv/{csv_id}"
+    })
 
-    for _, row in df.iterrows():
-        try:
-            listing = {
-                "sku": row.get("sku",""),
-                "keywords": row.get("keywords",""),
-                "notes": row.get("notes","")
-            }
-            examples = []  # optionally pull from row or elsewhere
-            shop_context = row.get("shop_context","")
-            shop_url = row.get("shop_url","")
+# Endpoint to download CSV
+@app.get("/download_csv/{csv_id}")
+def download_csv(csv_id: str):
+    csv_path = csv_store.get(csv_id)
+    if csv_path and os.path.exists(csv_path):
+        return FileResponse(csv_path, filename="filled_products.csv")
+    return JSONResponse({"error":"CSV not found"}, status_code=404)
 
-            raw_keywords = listing.get("keywords", "")
-            long_keywords_for_ai = [k.strip() for k in raw_keywords.split(",") if len(k.strip()) > TAG_MAX_LENGTH]
-            optional_keywords_str = ", ".join(long_keywords_for_ai)
-            short_keywords_for_tags = [k.strip() for k in raw_keywords.split(",") if len(k.strip()) <= TAG_MAX_LENGTH]
-
-            prompt = generate_prompt(listing, examples, shop_context, shop_url, optional_keywords_str)
-
-            image_url = row.get("image_url","")  # must be public URL
-            parsed_output = await call_openai(prompt, image_url=image_url if image_url else None)
-
-            tags = [t.strip() for t in parsed_output.get("tags", []) if len(t.strip()) <= TAG_MAX_LENGTH]
-            all_tags = []
-            for t in short_keywords_for_tags + tags:
-                if t not in all_tags:
-                    all_tags.append(t)
-
-            results.append({
-                "SKU": listing["sku"],
-                "Title": parsed_output.get("title",""),
-                "Description": parsed_output.get("description",""),
-                "Tags": ", ".join(all_tags[:13])
-            })
-            print(f"✅ Processed SKU {listing['sku']}")
-            await asyncio.sleep(2)
-
-        except Exception as e:
-            print(f"⚠️ Error processing row {row.get('sku','')}: {e}")
-            results.append({
-                "SKU": row.get("sku",""),
-                "Title": "",
-                "Description": "",
-                "Tags": ""
-            })
-
-    output_csv = build_csv(results)
-    print(f"✅ CSV generated at: {output_csv}")
-    return FileResponse(output_csv, filename="filled_products.csv")
-
-# -------------------- OPTIONAL ROOT --------------------
+# Optional root endpoint
 @app.get("/")
 def root():
-    return {"message": "Etsy Listing Generator backend is running!"}
+    return {"message":"Etsy Listing Generator backend is running!"}
 
-# -------------------- RUN --------------------
+# Run server locally
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
