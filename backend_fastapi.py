@@ -187,6 +187,109 @@ Rules:
         "csv_url": f"/download_csv/{csv_id}"
     })
 
+# -------------------- BULK CSV ENDPOINT --------------------
+@app.post("/generate_listings_csv")
+async def generate_listings_csv(request: str = Form(...)):
+    """
+    This endpoint is for CSV uploads (NO IMAGES).
+    It generates titles, descriptions, and tags using text-only analysis.
+    """
+
+    # Parse JSON from form
+    try:
+        data = json.loads(request)
+    except Exception as e:
+        print("❌ Failed to parse CSV request JSON:", request, e)
+        return JSONResponse({"error":"Invalid JSON in request", "details": str(e)}, status_code=400)
+
+    listings = data.get("listings", [])
+    examples = data.get("examples", [])
+    shop_context = data.get("shop_context", "")
+    shop_url = data.get("shop_url", "")
+
+    results = []
+
+    # Build examples text
+    examples_str = ""
+    for ex in examples:
+        examples_str += f"""
+Example:
+{{
+  "title": "{ex.get('title','')}",
+  "description": "{ex.get('description','')}",
+  "tags": {json.dumps(ex.get('tags',[]))}
+}}
+"""
+
+    for i, listing in enumerate(listings):
+        sku = listing.get("sku", f"row_{i}")
+
+        try:
+            raw_keywords = listing.get("keywords", "")
+            all_keywords = [k.strip() for k in raw_keywords.split(",") if k.strip()]
+            optional_keywords = [k for k in all_keywords if len(k) > TAG_MAX_LENGTH]
+            short_keywords = [k for k in all_keywords if len(k) <= TAG_MAX_LENGTH]
+
+            prompt = f"""
+You are an expert Etsy SEO copywriter.
+
+Here are examples of Etsy listings to follow:
+{examples_str}
+
+Generate Etsy listing content in JSON format ONLY (no markdown):
+{{
+  "title": "...",
+  "description": "...",
+  "tags": ["tag1","tag2",...,"tag20"]
+}}
+
+Rules:
+- Product is a printable digital download.
+- Use Optional Keywords exactly: {json.dumps(optional_keywords)}
+- Additional notes: {listing.get('notes','')}
+- Shop context: {shop_context}
+- Shop URL: {shop_url}
+- Max 20 tags, <= {TAG_MAX_LENGTH} chars
+- Respond ONLY with valid JSON
+"""
+
+            parsed = await call_openai(prompt)
+
+            tags = [t.strip() for t in parsed.get("tags", []) if len(t.strip()) <= TAG_MAX_LENGTH]
+
+            merged_tags = []
+            for t in short_keywords + tags:
+                if t not in merged_tags:
+                    merged_tags.append(t)
+
+            results.append({
+                "SKU": sku,
+                "Title": parsed.get("title", ""),
+                "Description": parsed.get("description", ""),
+                "Tags": merged_tags[:13]
+            })
+
+            print(f"✅ Processed CSV SKU {sku}")
+
+        except Exception as e:
+            print(f"⚠️ Error processing CSV SKU {sku}: {e}")
+            results.append({
+                "SKU": sku,
+                "Title": "",
+                "Description": "",
+                "Tags": []
+            })
+
+    # Save CSV
+    csv_path = build_csv(results)
+    csv_id = str(len(csv_store)+1)
+    csv_store[csv_id] = csv_path
+
+    return JSONResponse({
+        "results": results,
+        "csv_url": f"/download_csv/{csv_id}"
+    })
+          
 # Endpoint to download CSV
 @app.get("/download_csv/{csv_id}")
 def download_csv(csv_id: str):
@@ -205,3 +308,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
