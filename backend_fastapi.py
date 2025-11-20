@@ -189,39 +189,34 @@ Rules:
 
 # -------------------- BULK CSV ENDPOINT --------------------
 @app.post("/generate_listings_csv")
-async def generate_listings_csv(request: Request):
+async def generate_listings_csv(
+    file: UploadFile = File(None),              # Lovable uses "file"
+    csv: UploadFile = File(None),               # fallback
+    upload: UploadFile = File(None),            # fallback
+    other: UploadFile = File(None)              # fallback for unknown keys
+):
     """
-    Debug version: prints all incoming form fields so we can detect the CSV file key.
+    Universal CSV upload endpoint.
+    Accepts ANY file field name.
     """
 
-    form = await request.form()
+    # Pick the first non-empty file
+    csv_file = next((f for f in [file, csv, upload, other] if f and f.filename), None)
 
-    print("📥 Incoming form fields:")
-    for key, value in form.items():
-        print(f" - KEY: {key} | TYPE: {type(value)}")
-
-    # Detect CSV file automatically
-    csv_file = None
-
-    for key, value in form.items():
-        if isinstance(value, UploadFile):
-            print(f"📄 Detected UploadFile at field '{key}'")
-            csv_file = value
-            break
-
-    # ✅ Proper check: FastAPI UploadFile always exists, but filename is empty if no file uploaded
-    if not csv_file or csv_file.filename == "":
+    if not csv_file:
         return JSONResponse(
-            {"error": "No CSV file found in request. Upload must be form-data with a file."},
+            {"error": "No CSV file uploaded. Make sure you send form-data with a file."},
             status_code=400
         )
+
+    print(f"📄 Received CSV file: {csv_file.filename}")
 
     # Read CSV
     content = await csv_file.read()
     text = content.decode("utf-8", errors="ignore")
 
-    import csv, io
-    reader = csv.DictReader(io.StringIO(text))
+    import csv as csv_lib, io
+    reader = csv_lib.DictReader(io.StringIO(text))
 
     listings = []
     for row in reader:
@@ -233,7 +228,7 @@ async def generate_listings_csv(request: Request):
 
     print(f"📦 Loaded {len(listings)} listings from CSV")
 
-    # ---- continue with normal logic below ----
+    # ---- your existing logic continues unchanged ----
 
     examples = []
     shop_context = ""
@@ -318,7 +313,6 @@ Rules:
         "results": results,
         "csv_url": f"/download_csv/{csv_id}"
     })
-
           
 # Endpoint to download CSV
 @app.get("/download_csv/{csv_id}")
@@ -338,6 +332,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
