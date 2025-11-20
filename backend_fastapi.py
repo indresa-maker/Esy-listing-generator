@@ -209,7 +209,8 @@ async def generate_listings_csv(request: Request):
             csv_file = value
             break
 
-    if not csv_file:
+    # ✅ Proper check: FastAPI UploadFile always exists, but filename is empty if no file uploaded
+    if not csv_file or csv_file.filename == "":
         return JSONResponse(
             {"error": "No CSV file found in request. Upload must be form-data with a file."},
             status_code=400
@@ -317,6 +318,7 @@ Rules:
         "results": results,
         "csv_url": f"/download_csv/{csv_id}"
     })
+
           
 # Endpoint to download CSV
 @app.get("/download_csv/{csv_id}")
@@ -336,6 +338,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
