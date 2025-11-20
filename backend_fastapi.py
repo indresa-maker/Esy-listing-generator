@@ -8,6 +8,7 @@ import pandas as pd
 import asyncio
 from typing import List
 import requests
+import csv, io
 
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -189,52 +190,121 @@ Rules:
 
 # -------------------- BULK CSV ENDPOINT --------------------
 @app.post("/generate_listings_csv")
-async def generate_listings_csv(
-    file: UploadFile = File(None),              # Lovable uses "file"
-    csv: UploadFile = File(None),               # fallback
-    upload: UploadFile = File(None),            # fallback
-    other: UploadFile = File(None)              # fallback for unknown keys
-):
+async def generate_listings_csv(request: Request):
     """
-    Universal CSV upload endpoint.
-    Accepts ANY file field name.
+    Bulk CSV upload endpoint.
+    - Accepts any CSV file field name (Lovable uses "file")
+    - Automatically detects SKU column (case-insensitive)
+    - Generates listing JSON + downloadable CSV
     """
 
-    # Pick the first non-empty file
-    csv_file = next((f for f in [file, csv, upload, other] if f and f.filename), None)
+    # ------------------------------
+    # 1) Read incoming form-data
+    # ------------------------------
+    form = await request.form()
+
+    print("📥 Incoming form fields:")
+    for key, value in form.items():
+        print(f" - KEY: {key} | TYPE: {type(value)}")
+
+    # Detect CSV file (UploadFile)
+    csv_file = None
+    for key, value in form.items():
+        if isinstance(value, UploadFile):
+            print(f"📄 Detected CSV UploadFile at field '{key}'")
+            csv_file = value
+            break
 
     if not csv_file:
         return JSONResponse(
-            {"error": "No CSV file uploaded. Make sure you send form-data with a file."},
+            {"error": "No CSV file found in request. Upload must be form-data with a file."},
             status_code=400
         )
 
-    print(f"📄 Received CSV file: {csv_file.filename}")
-
-    # Read CSV
+    # ------------------------------
+    # 2) Read CSV text into dict rows
+    # ------------------------------
     content = await csv_file.read()
     text = content.decode("utf-8", errors="ignore")
 
-    import csv as csv_lib, io
-    reader = csv_lib.DictReader(io.StringIO(text))
+    import csv, io
+    reader = csv.DictReader(io.StringIO(text))
+
+    fieldnames = reader.fieldnames or []
+    print("📄 CSV headers detected:", fieldnames)
+
+    # Normalize header mapping
+    lower_to_orig = {fn.lower(): fn for fn in fieldnames}
+
+    # Candidate SKU header names
+    sku_candidates = [
+        "sku", "productid", "product_id", "product id",
+        "id", "item", "itemnumber", "item_number", "item id"
+    ]
+
+    # Try direct match first
+    sku_field = None
+    for cand in sku_candidates:
+        if cand in lower_to_orig:
+            sku_field = lower_to_orig[cand]
+            break
+
+    # Heuristic fallback: header containing "sku" or ending in "id"
+    if not sku_field:
+        for fn in fieldnames:
+            low = fn.lower()
+            if "sku" in low or (low.endswith("id") and not low.startswith("image")):
+                sku_field = fn
+                break
+
+    print(f"🔍 Detected SKU column: {sku_field}")
 
     listings = []
-    for row in reader:
+    for idx, row in enumerate(reader):
+        # SKU extraction
+        sku_val = ""
+        if sku_field:
+            sku_val = (row.get(sku_field) or "").strip()
+
+        # Additional fallback keys
+        if not sku_val:
+            for alt in ["SKU", "sku", "id", "ID", "product_id", "product id", "ProductID"]:
+                if alt in row:
+                    sku_val = (row.get(alt) or "").strip()
+                if sku_val:
+                    break
+
+        # Final fallback: generate SKU
+        if not sku_val:
+            sku_val = f"csv_row_{idx+1}"
+
         listings.append({
-            "sku": row.get("SKU", ""),
-            "keywords": row.get("Keywords", ""),
-            "notes": row.get("Notes", "")
+            "sku": sku_val,
+            "keywords": (
+                row.get("Keywords")
+                or row.get("keywords")
+                or row.get("Tags")
+                or row.get("tags")
+                or ""
+            ),
+            "notes": (
+                row.get("Notes")
+                or row.get("notes")
+                or ""
+            )
         })
 
     print(f"📦 Loaded {len(listings)} listings from CSV")
 
-    # ---- your existing logic continues unchanged ----
-
-    examples = []
-    shop_context = ""
-    shop_url = ""
+    # ------------------------------
+    # 3) AI Generation
+    # ------------------------------
+    examples = []          # CSV mode usually doesn't include examples
+    shop_context = ""      # future use
+    shop_url = ""          # future use
     results = []
 
+    # Build example block
     examples_str = ""
     for ex in examples:
         examples_str += f"""
@@ -246,8 +316,9 @@ Example:
 }}
 """
 
+    # Process each row
     for i, listing in enumerate(listings):
-        sku = listing.get("sku") or f"row_{i}"
+        sku = listing["sku"]
 
         try:
             raw_keywords = listing.get("keywords", "")
@@ -255,6 +326,7 @@ Example:
             optional_keywords = [k for k in all_keywords if len(k) > TAG_MAX_LENGTH]
             short_keywords = [k for k in all_keywords if len(k) <= TAG_MAX_LENGTH]
 
+            # Prompt
             prompt = f"""
 You are an expert Etsy SEO copywriter.
 
@@ -279,7 +351,10 @@ Rules:
 
             parsed = await call_openai(prompt)
 
-            tags = [t.strip() for t in parsed.get("tags", []) if len(t.strip()) <= TAG_MAX_LENGTH]
+            tags = [
+                t.strip() for t in parsed.get("tags", [])
+                if len(t.strip()) <= TAG_MAX_LENGTH
+            ]
 
             merged_tags = []
             for t in short_keywords + tags:
@@ -304,15 +379,18 @@ Rules:
                 "Tags": []
             })
 
-    # Save CSV
+    # ------------------------------
+    # 4) Generate output CSV
+    # ------------------------------
     csv_path = build_csv(results)
-    csv_id = str(len(csv_store)+1)
+    csv_id = str(len(csv_store) + 1)
     csv_store[csv_id] = csv_path
 
     return JSONResponse({
         "results": results,
         "csv_url": f"/download_csv/{csv_id}"
     })
+
           
 # Endpoint to download CSV
 @app.get("/download_csv/{csv_id}")
@@ -332,6 +410,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
