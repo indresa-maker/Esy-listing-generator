@@ -189,27 +189,36 @@ Rules:
 
 # -------------------- BULK CSV ENDPOINT --------------------
 @app.post("/generate_listings_csv")
-async def generate_listings_csv(request: str = Form(...)):
+async def generate_listings_csv(file: UploadFile = File(...)):
     """
-    This endpoint is for CSV uploads (NO IMAGES).
-    It generates titles, descriptions, and tags using text-only analysis.
+    Correctly handles CSV uploads from Lovable.
     """
 
-    # Parse JSON from form
-    try:
-        data = json.loads(request)
-    except Exception as e:
-        print("❌ Failed to parse CSV request JSON:", request, e)
-        return JSONResponse({"error":"Invalid JSON in request", "details": str(e)}, status_code=400)
+    import csv
+    import io
 
-    listings = data.get("listings", [])
-    examples = data.get("examples", [])
-    shop_context = data.get("shop_context", "")
-    shop_url = data.get("shop_url", "")
+    # Read CSV bytes → text
+    content = await file.read()
+    text = content.decode("utf-8", errors="ignore")
+    reader = csv.DictReader(io.StringIO(text))
+
+    listings = []
+    for row in reader:
+        listings.append({
+            "sku": row.get("SKU", ""),
+            "keywords": row.get("Keywords", ""),
+            "notes": row.get("Notes", "")
+        })
+
+    print(f"📦 Loaded {len(listings)} listings from CSV")
+
+    # No examples/ shop_context yet (Lovable can pass these later)
+    examples = []
+    shop_context = ""
+    shop_url = ""
 
     results = []
 
-    # Build examples text
     examples_str = ""
     for ex in examples:
         examples_str += f"""
@@ -222,7 +231,7 @@ Example:
 """
 
     for i, listing in enumerate(listings):
-        sku = listing.get("sku", f"row_{i}")
+        sku = listing.get("sku") or f"row_{i}"
 
         try:
             raw_keywords = listing.get("keywords", "")
@@ -236,7 +245,7 @@ You are an expert Etsy SEO copywriter.
 Here are examples of Etsy listings to follow:
 {examples_str}
 
-Generate Etsy listing content in JSON format ONLY (no markdown):
+Generate Etsy listing content in JSON format ONLY:
 {{
   "title": "...",
   "description": "...",
@@ -245,12 +254,11 @@ Generate Etsy listing content in JSON format ONLY (no markdown):
 
 Rules:
 - Product is a printable digital download.
-- Use Optional Keywords exactly: {json.dumps(optional_keywords)}
-- Additional notes: {listing.get('notes','')}
+- Optional keywords: {json.dumps(optional_keywords)}
+- Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
-- Max 20 tags, <= {TAG_MAX_LENGTH} chars
-- Respond ONLY with valid JSON
+- Tags <= {TAG_MAX_LENGTH} chars each
 """
 
             parsed = await call_openai(prompt)
@@ -308,4 +316,5 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
