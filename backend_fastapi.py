@@ -9,7 +9,7 @@ import asyncio
 from typing import List
 import requests
 
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -189,17 +189,33 @@ Rules:
 
 # -------------------- BULK CSV ENDPOINT --------------------
 @app.post("/generate_listings_csv")
-async def generate_listings_csv(file: UploadFile = File(...)):
+async def generate_listings_csv(request: Request):
     """
-    Correctly handles CSV uploads from Lovable.
+    Accepts ANY uploaded CSV file regardless of field name.
+    This prevents 422 errors caused by mismatched form field names.
     """
 
-    import csv
-    import io
+    form = await request.form()
 
-    # Read CSV bytes → text
-    content = await file.read()
+    # Detect CSV file automatically
+    csv_file: UploadFile = None
+
+    for key, value in form.items():
+        if isinstance(value, UploadFile):
+            csv_file = value
+            break
+
+    if not csv_file:
+        return JSONResponse(
+            {"error": "No CSV file found in request. Upload must be form-data with a file."},
+            status_code=400
+        )
+
+    # Read CSV
+    content = await csv_file.read()
     text = content.decode("utf-8", errors="ignore")
+
+    import csv, io
     reader = csv.DictReader(io.StringIO(text))
 
     listings = []
@@ -212,11 +228,11 @@ async def generate_listings_csv(file: UploadFile = File(...)):
 
     print(f"📦 Loaded {len(listings)} listings from CSV")
 
-    # No examples/ shop_context yet (Lovable can pass these later)
+    # ---- same logic as before ----
+
     examples = []
     shop_context = ""
     shop_url = ""
-
     results = []
 
     examples_str = ""
@@ -316,5 +332,6 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
