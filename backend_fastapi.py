@@ -191,17 +191,21 @@ Rules:
 @app.post("/generate_listings_csv")
 async def generate_listings_csv(request: Request):
     """
-    Accepts ANY uploaded CSV file regardless of field name.
-    This prevents 422 errors caused by mismatched form field names.
+    Debug version: prints all incoming form fields so we can detect the CSV file key.
     """
 
     form = await request.form()
 
+    print("📥 Incoming form fields:")
+    for key, value in form.items():
+        print(f" - KEY: {key} | TYPE: {type(value)}")
+
     # Detect CSV file automatically
-    csv_file: UploadFile = None
+    csv_file = None
 
     for key, value in form.items():
         if isinstance(value, UploadFile):
+            print(f"📄 Detected UploadFile at field '{key}'")
             csv_file = value
             break
 
@@ -228,7 +232,7 @@ async def generate_listings_csv(request: Request):
 
     print(f"📦 Loaded {len(listings)} listings from CSV")
 
-    # ---- same logic as before ----
+    # ---- continue with normal logic below ----
 
     examples = []
     shop_context = ""
@@ -332,6 +336,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
