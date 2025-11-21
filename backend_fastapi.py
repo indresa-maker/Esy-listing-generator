@@ -163,13 +163,43 @@ Now analyze the uploaded image and generate Etsy listing content in JSON format:
   "tags": ["tag1","tag2",...,"tag20"]
 }}
 
-Rules:
-- Use Optional Keywords exactly: {optional_keywords_str}
-- Additional context: {listing.get('notes','')}
+CRITICAL TITLE RULES:
+- Title MUST be between **45 and 85 characters**
+- Title MUST clearly identify the product type
+- Include **2–3 descriptive modifiers**
+- DO NOT repeat words
+- DO NOT use any long keywords (>20 characters)
+- DO NOT include every keyword; keep it natural
+
+DESCRIPTION RULES:
+- Description must be **at least 375 words**
+- First **300 characters MUST be extremely keyword rich**
+- Use line breaks, bullet points, or numbered lists
+- You MUST include all long keywords (listed below) somewhere in the description
+- Long keywords = keywords >20 characters, shown here: {json.dumps(optional_keywords_for_ai)}
+- These long keywords must NEVER appear in the title or tags
+- Make the description highly detailed, professional, and persuasive
+- The wording should sound natural. 
+- Clearly identify product type, style, colors, use cases, room placement, and features
+- Make the description layout and tone similar to the examples given in {examples_str}
+
+TAG RULES:
+- Tags MUST be **2–3 words each**
+- Each tag MUST be **at least 10 characters** and **no more than 20 characters**
+- DO NOT repeat words across multiple tags
+- Deduplicate tags
+- Generate up to **20 tags maximum**
+
+OTHER RULES:
+- Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
-- Generate 20 tags max, deduplicate, tags <= {TAG_MAX_LENGTH} chars
-- Respond ONLY with valid JSON
+
+INPUT KEYWORDS:
+- Long keywords (>20 chars, use only in description): {json.dumps(optional_keywords)}
+
+IMPORTANT:
+Respond ONLY with valid JSON. No commentary.
 """
             print(f"📝 Prompt for SKU {sku}:\n{prompt[:500]}...")  # first 500 chars
 
@@ -295,12 +325,43 @@ Generate Etsy listing content in JSON format ONLY:
   "tags": ["tag1","tag2",...,"tag20"]
 }}
 
-Rules:
-- Optional keywords: {json.dumps(optional_keywords)}
+CRITICAL TITLE RULES:
+- Title MUST be between **45 and 85 characters**
+- Title MUST clearly identify the product type
+- Include **2–3 descriptive modifiers**
+- DO NOT repeat words
+- DO NOT use any long keywords (>20 characters)
+- DO NOT include every keyword; keep it natural
+
+DESCRIPTION RULES:
+- Description must be **at least 375 words**
+- First **300 characters MUST be extremely keyword rich**
+- Use line breaks, bullet points, or numbered lists
+- You MUST include all long keywords (listed below) somewhere in the description
+- Long keywords = keywords >20 characters, shown here: {json.dumps(optional_keywords)}
+- These long keywords must NEVER appear in the title or tags
+- Make the description highly detailed, professional, and persuasive
+- The wording should sound natural. 
+- Clearly identify product type, style, colors, use cases, room placement, and features
+- Make the description layout and tone similar to the examples given in {examples_str}
+
+TAG RULES:
+- Tags MUST be **2–3 words each**
+- Each tag MUST be **at least 10 characters** and **no more than 20 characters**
+- DO NOT repeat words across multiple tags
+- Deduplicate tags
+- Generate up to **20 tags maximum**
+
+OTHER RULES:
 - Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
-- Tags <= {TAG_MAX_LENGTH} chars each
+
+INPUT KEYWORDS:
+- Long keywords (>20 chars, use only in description): {json.dumps(optional_keywords)}
+
+IMPORTANT:
+Respond ONLY with valid JSON. No commentary.
 """
 
             parsed = await call_openai(prompt, image_url=listing.get("image_url"))
@@ -358,6 +419,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
