@@ -55,10 +55,29 @@ async def call_openai(prompt, image_url=None):
     return safe_parse_json(raw_text)
 
 def build_csv(results):
-    temp_dir = tempfile.mkdtemp()
-    output_csv = os.path.join(temp_dir, "filled_products.csv")
-    pd.DataFrame(results).to_csv(output_csv, index=False)
-    return output_csv
+    import csv, uuid, os
+    
+    filename = f"/tmp/{uuid.uuid4()}.csv"
+    
+    with open(filename, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        
+        # Header
+        writer.writerow(["SKU", "Title", "Description", "Tags"])
+        
+        for item in results:
+            # Convert tags list → comma-separated string
+            tags_list = item.get("Tags", [])
+            tag_string = ", ".join(tags_list)
+
+            writer.writerow([
+                item.get("SKU", ""),
+                item.get("Title", ""),
+                item.get("Description", ""),
+                tag_string  # 👈 now clean
+            ])
+    
+    return filename
 
 # -------------------- FASTAPI SETUP --------------------
 app = FastAPI(title="Etsy Listing Generator")
@@ -145,7 +164,6 @@ Now analyze the uploaded image and generate Etsy listing content in JSON format:
 }}
 
 Rules:
-- Product is a printable digital download.
 - Use Optional Keywords exactly: {optional_keywords_str}
 - Additional context: {listing.get('notes','')}
 - Shop context: {shop_context}
@@ -278,7 +296,6 @@ Generate Etsy listing content in JSON format ONLY:
 }}
 
 Rules:
-- Product is a printable digital download.
 - Optional keywords: {json.dumps(optional_keywords)}
 - Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
@@ -341,6 +358,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
