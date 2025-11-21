@@ -196,7 +196,7 @@ OTHER RULES:
 - Shop URL: {shop_url}
 
 INPUT KEYWORDS:
-- Long keywords (>20 chars, use only in description): {json.dumps(optional_keywords)}
+- Long keywords (>20 chars, use only in description): {json.dumps(optional_keywords_for_ai)}
 
 IMPORTANT:
 Respond ONLY with valid JSON. No commentary.
@@ -419,6 +419,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
