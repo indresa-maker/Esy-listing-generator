@@ -92,7 +92,7 @@ app.add_middleware(
 # Temporary store of CSVs
 csv_store = {}
 
-# -------------------- ENDPOINT --------------------
+# -------------------- SINGLE LISTING ENDPOINT --------------------
 @app.post("/generate_listings_app")
 async def generate_listings_app(
     request: str = Form(...),
@@ -181,12 +181,13 @@ DESCRIPTION RULES:
 - Make the description highly detailed, professional, and persuasive
 - The wording should sound natural. 
 - Clearly identify product type, style, colors, use cases, room placement, and features
-- Make the description layout and tone similar to the examples given in {examples_str}
+- Make the description structure, layout and tone similar to the examples given in {examples_str}
 
 TAG RULES:
 - Tags MUST be **2–3 words each**
 - Each tag MUST be **at least 10 characters** and **no more than 20 characters**
-- DO NOT repeat words across multiple tags
+- DO NOT repeat words across multiple tags 
+- Avoid generic tags, try to make them specific and long-tail
 - Deduplicate tags
 - Generate up to **20 tags maximum**
 
@@ -330,6 +331,7 @@ CRITICAL TITLE RULES:
 - Title MUST clearly identify the product type
 - Include **2–3 descriptive modifiers**
 - DO NOT repeat words
+- Avoid generic tags, try to make them specific and long-tail
 - DO NOT use any long keywords (>20 characters)
 - DO NOT include every keyword; keep it natural
 
@@ -343,12 +345,13 @@ DESCRIPTION RULES:
 - Make the description highly detailed, professional, and persuasive
 - The wording should sound natural. 
 - Clearly identify product type, style, colors, use cases, room placement, and features
-- Make the description layout and tone similar to the examples given in {examples_str}
+- Make the description structure, layout and tone similar to the examples given in {examples_str}
 
 TAG RULES:
 - Tags MUST be **2–3 words each**
 - Each tag MUST be **at least 10 characters** and **no more than 20 characters**
 - DO NOT repeat words across multiple tags
+- Avoid generic tags, try to make them specific and long-tail
 - Deduplicate tags
 - Generate up to **20 tags maximum**
 
@@ -419,6 +422,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
