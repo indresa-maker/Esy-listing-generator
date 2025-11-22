@@ -139,15 +139,19 @@ async def generate_listings_app(
 
             # Build examples string
             examples_str = ""
-            for ex in examples:
-                examples_str += f"""
-Example:
-{{
-  "title": "{ex.get('title','')}",
-  "description": "{ex.get('description','')}",
-  "tags": {json.dumps(ex.get('tags',[]))}
-}}
-"""
+for ex in examples:
+    title = json.dumps(ex.get("title", ""))
+    description = json.dumps(ex.get("description", ""))
+    tags = json.dumps(ex.get("tags", []))
+
+    examples_str += (
+        "Example:\n"
+        "{\n"
+        f'  "title": {title},\n'
+        f'  "description": {description},\n'
+        f'  "tags": {tags}\n'
+        "}\n\n"
+    )
 
             # Build prompt
             prompt = f"""
@@ -422,6 +426,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
