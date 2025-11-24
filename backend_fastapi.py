@@ -145,7 +145,7 @@ Now analyze the uploaded image and generate Etsy listing content in JSON format:
 CRITICAL TITLE RULES:
 - Title MUST be between 45 and 85 characters
 - Title MUST clearly identify the product type
-- Include 2-3 descriptive modifiers
+- Include 2 or 3 descriptive modifiers
 - DO NOT repeat words
 - DO NOT use any long keywords (>20 characters)
 - DO NOT include every keyword; keep it natural, descriptive but short
@@ -270,7 +270,7 @@ Now analyze the uploaded image and generate Etsy listing content in JSON format:
 CRITICAL TITLE RULES:
 - Title MUST be between 45 and 85 characters
 - Title MUST clearly identify the product type
-- Include 2–3 descriptive modifiers
+- Include 2 or 3 descriptive modifiers
 - DO NOT repeat words
 - DO NOT use any long keywords (>20 characters)
 - DO NOT include every keyword; keep it natural, descriptive but short
@@ -334,4 +334,5 @@ def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
 
