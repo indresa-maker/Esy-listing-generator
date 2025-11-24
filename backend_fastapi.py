@@ -30,9 +30,10 @@ def upload_to_fileio(file_path):
     """Upload a file to file.io and return temporary public URL"""
     with open(file_path, "rb") as f:
         resp = requests.post("https://file.io", files={"file": f}, data={"expires":"1d"})
+    print("📤 file.io response:", resp.text)
     resp.raise_for_status()
     data = resp.json()
-    if "link" not in data:
+    if not data.get("success"):
         raise Exception(f"file.io upload failed: {data}")
     return data["link"]
 
@@ -334,6 +335,7 @@ def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
 
 
 
