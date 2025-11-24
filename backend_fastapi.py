@@ -145,7 +145,7 @@ Now analyze the uploaded image and generate Etsy listing content in JSON format:
 CRITICAL TITLE RULES:
 - Title MUST be between 45 and 85 characters
 - Title MUST clearly identify the product type
-- Include 2–3 descriptive modifiers
+- Include 2-3 descriptive modifiers
 - DO NOT repeat words
 - DO NOT use any long keywords (>20 characters)
 - DO NOT include every keyword; keep it natural, descriptive but short
@@ -254,7 +254,7 @@ async def generate_listings_csv(
                 examples_str += f"Example:\n{{\n  \"title\": {title},\n  \"description\": {description},\n  \"tags\": {tags}\n}}\n\n"
 
             # Build prompt using your original logic
-            prompt = f"..."  
+            prompt = f"""  
 You are an expert Etsy SEO copywriter.
 
 Here are examples of Etsy listings to follow:
@@ -287,7 +287,7 @@ DESCRIPTION RULES:
 - Shop URL: {shop_url}
 
 TAG RULES:
-- Tags MUST be 2–3 words each
+- Tags MUST be 2-3 words each
 - Each tag MUST be 10–20 characters
 - Deduplicate tags
 - Generate up to 20 tags
@@ -334,3 +334,4 @@ def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
