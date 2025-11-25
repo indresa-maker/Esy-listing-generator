@@ -179,8 +179,7 @@ DESCRIPTION RULES:
 - Description must be at least 375 words
 - First 300 characters MUST be extremely keyword rich
 - Use line breaks, bullet points, numbered lists
-- Include ALL long keywords (>20 chars): {json.dumps(optional_keywords_str)}
-- Long keywords must NEVER appear in the title or tags
+- You MUST include ALL long keywords (>20 chars): {json.dumps(optional_keywords_str)}
 - Clearly identify product type, style, colors, use cases, room placement, and features
 - Keep the structure and tone of the description as close as possible to the examples {examples_str}
 - Notes: {listing.get('notes','')}
@@ -324,7 +323,7 @@ DESCRIPTION RULES:
 - Description must be at least 375 words
 - First 300 characters MUST be extremely keyword rich
 - Use line breaks, bullet points, numbered lists
-- Include ALL long keywords (>20 chars): {json.dumps(optional_keywords)}
+- You MUST include ALL long keywords (>20 chars): {json.dumps(optional_keywords)}
 - Long keywords must NEVER appear in the title or tags
 - Clearly identify product type, style, colors, use cases, room placement, and features
 - Keep the structure and tone of the description as close as possible to the examples {examples_str}
@@ -398,3 +397,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
