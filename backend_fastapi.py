@@ -172,15 +172,15 @@ CRITICAL TITLE RULES:
 - Title MUST be between 45 and 85 characters
 - Title MUST clearly identify the product type
 - Include 2–3 descriptive modifiers
-- DO NOT include long keywords (>20 chars): {json.dumps(optional_keywords_for_ai)}
+- DO NOT include ANY of the long keywords (>20 chars): {json.dumps(optional_keywords_str)}
 - DO NOT repeat words
-- DO NOT include every keyword; keep it natural, descriptive but short, for example "Custom Leaf Birthstone Earrings - Unique Gift for Her" or "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
+- Keep it natural, descriptive but short, for example "Custom Leaf Birthstone Earrings - Unique Gift for Her" or "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
 
 DESCRIPTION RULES:
 - Description must be at least 375 words
 - First 300 characters MUST be extremely keyword rich
 - Use line breaks, bullet points, numbered lists
-- Include all long keywords (>20 chars): {json.dumps(optional_keywords_for_ai)}
+- Include ALL long keywords (>20 chars): {json.dumps(optional_keywords_str)}
 - Long keywords must NEVER appear in the title or tags
 - Clearly identify product type, style, colors, use cases, room placement, and features
 - Notes: {listing.get('notes','')}
@@ -325,15 +325,15 @@ CRITICAL TITLE RULES:
 - Title MUST be between 45 and 85 characters
 - Title MUST clearly identify the product type
 - Include 2–3 descriptive modifiers
-- DO NOT include long keywords (>20 chars): {json.dumps(optional_keywords)}
+- DO NOT include ANY long keywords (>20 chars): {json.dumps(optional_keywords)}
 - DO NOT repeat words
-- DO NOT include every keyword; keep it natural, descriptive but short, for example "Custom Leaf Birthstone Earrings - Unique Gift for Her" or "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
+- Keep it natural, descriptive but short, for example "Custom Leaf Birthstone Earrings - Unique Gift for Her" or "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
 
 DESCRIPTION RULES:
 - Description must be at least 375 words
 - First 300 characters MUST be extremely keyword rich
 - Use line breaks, bullet points, numbered lists
-- Include all long keywords (>20 chars): {json.dumps(optional_keywords)}
+- Include ALL long keywords (>20 chars): {json.dumps(optional_keywords)}
 - Long keywords must NEVER appear in the title or tags
 - Clearly identify product type, style, colors, use cases, room placement, and features
 - Notes: {listing.get('notes','')}
@@ -406,6 +406,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
