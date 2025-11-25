@@ -174,7 +174,7 @@ CRITICAL TITLE RULES:
 - Include 2–3 descriptive modifiers
 - DO NOT include ANY of the long keywords (>20 chars): {json.dumps(optional_keywords_str)}
 - DO NOT repeat words
-- Keep it natural, descriptive but short, for example "Custom Leaf Birthstone Earrings - Unique Gift for Her" or "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
+- Keep it natural, descriptive but short, example formats: "Custom Leaf Birthstone Earrings - Unique Gift for Her", "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
 
 DESCRIPTION RULES:
 - Description must be at least 375 words
@@ -183,6 +183,7 @@ DESCRIPTION RULES:
 - Include ALL long keywords (>20 chars): {json.dumps(optional_keywords_str)}
 - Long keywords must NEVER appear in the title or tags
 - Clearly identify product type, style, colors, use cases, room placement, and features
+- Keep the structure and tone of the description as close as possible to the examples {examples_str}
 - Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
@@ -327,7 +328,7 @@ CRITICAL TITLE RULES:
 - Include 2–3 descriptive modifiers
 - DO NOT include ANY long keywords (>20 chars): {json.dumps(optional_keywords)}
 - DO NOT repeat words
-- Keep it natural, descriptive but short, for example "Custom Leaf Birthstone Earrings - Unique Gift for Her" or "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
+- Keep it natural, descriptive but short, example formats: "Custom Leaf Birthstone Earrings - Unique Gift for Her", "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
 
 DESCRIPTION RULES:
 - Description must be at least 375 words
@@ -336,6 +337,7 @@ DESCRIPTION RULES:
 - Include ALL long keywords (>20 chars): {json.dumps(optional_keywords)}
 - Long keywords must NEVER appear in the title or tags
 - Clearly identify product type, style, colors, use cases, room placement, and features
+- Keep the structure and tone of the description as close as possible to the examples {examples_str}
 - Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
@@ -406,6 +408,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 
