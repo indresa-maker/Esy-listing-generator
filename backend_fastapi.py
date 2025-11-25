@@ -92,7 +92,7 @@ app.add_middleware(
 # Temporary store of CSVs
 csv_store = {}
 
-# -------------------- ENDPOINT --------------------
+# -------------------- ENDPOINT 1 --------------------
 @app.post("/generate_listings_app")
 async def generate_listings_app(
     request: str = Form(...),
@@ -156,6 +156,11 @@ You are an expert Etsy SEO copywriter.
 Here are examples of Etsy listings to follow:
 {examples_str}
 
+You are an expert Etsy SEO copywriter.
+
+Here are examples of Etsy listings to follow:
+{examples_str}
+
 Now analyze the uploaded image and generate Etsy listing content in JSON format:
 {{
   "title": "generated title",
@@ -163,13 +168,34 @@ Now analyze the uploaded image and generate Etsy listing content in JSON format:
   "tags": ["tag1","tag2",...,"tag20"]
 }}
 
-Rules:
-- Use Optional Keywords exactly: {optional_keywords_str}
-- Additional context: {listing.get('notes','')}
+CRITICAL TITLE RULES:
+- Title MUST be between 45 and 85 characters
+- Title MUST clearly identify the product type
+- Include 2–3 descriptive modifiers
+- DO NOT repeat words
+- DO NOT use any long keywords (>20 characters)
+- DO NOT include every keyword; keep it natural, descriptive but short
+
+DESCRIPTION RULES:
+- Description must be at least 375 words
+- First 300 characters MUST be extremely keyword rich
+- Use line breaks, bullet points, numbered lists
+- Include all long keywords (>20 chars): {json.dumps(optional_keywords_str)}
+- Long keywords must NEVER appear in the title or tags
+- Clearly identify product type, style, colors, use cases, room placement, and features
+- Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
-- Generate 20 tags max, deduplicate, tags <= {TAG_MAX_LENGTH} chars
-- Respond ONLY with valid JSON
+
+TAG RULES:
+- Tags MUST be 2–3 words each
+- Each tag MUST be 10–20 characters
+- Deduplicate tags
+- Generate up to 20 tags
+- Avoid generic tags, make them specific and long-tail
+
+IMPORTANT:
+Respond ONLY with valid JSON.
 """
             print(f"📝 Prompt for SKU {sku}:\n{prompt[:500]}...")  # first 500 chars
 
@@ -295,12 +321,34 @@ Generate Etsy listing content in JSON format ONLY:
   "tags": ["tag1","tag2",...,"tag20"]
 }}
 
-Rules:
-- Optional keywords: {json.dumps(optional_keywords)}
+CRITICAL TITLE RULES:
+- Title MUST be between 45 and 85 characters
+- Title MUST clearly identify the product type
+- Include 2–3 descriptive modifiers
+- DO NOT repeat words
+- DO NOT use any long keywords (>20 characters)
+- DO NOT include every keyword; keep it natural, descriptive but short
+
+DESCRIPTION RULES:
+- Description must be at least 375 words
+- First 300 characters MUST be extremely keyword rich
+- Use line breaks, bullet points, numbered lists
+- Include all long keywords (>20 chars): {json.dumps(optional_keywords)}
+- Long keywords must NEVER appear in the title or tags
+- Clearly identify product type, style, colors, use cases, room placement, and features
 - Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
-- Tags <= {TAG_MAX_LENGTH} chars each
+
+TAG RULES:
+- Tags MUST be 2–3 words each
+- Each tag MUST be 10–20 characters
+- Deduplicate tags
+- Generate up to 20 tags
+- Avoid generic tags, make them specific and long-tail
+
+IMPORTANT:
+Respond ONLY with valid JSON.
 """
 
             parsed = await call_openai(prompt, image_url=listing.get("image_url"))
