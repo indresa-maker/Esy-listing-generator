@@ -125,17 +125,21 @@ async def generate_listings_app(
             logger.warning(f"Invalid image type for SKU {sku}")
             return {"SKU": sku, "Title": "", "Description": "", "Tags": []}
 
-        if image_file.spool_max_size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
+        # Read the file content
+        content = await image_file.read()
+
+        # Max file size check
+        if len(content) > MAX_IMAGE_SIZE_MB * 1024 * 1024:
             logger.warning(f"Image too large for SKU {sku}")
             return {"SKU": sku, "Title": "", "Description": "", "Tags": []}
 
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                image_path = f"{temp_dir}/{image_file.filename}"
-                async with aiofiles.open(image_path, "wb") as f:
-                    content = await image_file.read()
-                    await f.write(content)
-                image_b64 = encode_image_base64(image_path)
+        # Save to temporary file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = f"{temp_dir}/{image_file.filename}"
+            async with aiofiles.open(image_path, "wb") as f:
+                await f.write(content)
+            image_b64 = encode_image_base64(image_path)
+        
         except Exception as e:
             logger.error(f"Error processing image for SKU {sku}: {e}")
             image_b64 = None
@@ -307,3 +311,4 @@ async def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
