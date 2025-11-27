@@ -55,15 +55,15 @@ async def save_csv_async(results: List[dict]) -> str:
     filename = f"/tmp/{uuid.uuid4()}.csv"
     async with aiofiles.open(filename, mode="w", encoding="utf-8") as f:
         # Write header
-         await f.write("SKU,Title,Description,Tags\n")
+        await f.write("SKU,Title,Description,Tags\n")
     
-         # Write each row
+        # Write each row
         for item in results:
-             tag_string = ", ".join(item.get("Tags", []))  # same format you used
-             line = (
+            tag_string = ", ".join(item.get("Tags", []))  # same format you used
+            line = (
                 f"{item.get('SKU','')},"
-                 f"{item.get('Title','')},"
-                 f"{item.get('Description','')},"
+                f"{item.get('Title','')},"
+                f"{item.get('Description','')},"
                 f"{tag_string}\n"
             )
             await f.write(line)
@@ -319,6 +319,7 @@ async def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
 
 
 
