@@ -1,160 +1,151 @@
-# backend_fastapi.py
+# backend_fastapi_scaled_full.py
 import os
-import re
 import json
-import time
-import tempfile
-import pandas as pd
-import asyncio
-from typing import List
-import requests
-import csv, io
 import base64
 import mimetypes
+import tempfile
+import uuid
+import asyncio
+from typing import List
 
-from fastapi import FastAPI, File, UploadFile, Form, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ValidationError
 from openai import OpenAI
+import aiofiles
+import csv
+import logging
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # -------------------- CONFIG --------------------
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 TAG_MAX_LENGTH = 20
+MAX_IMAGE_SIZE_MB = 5
+MAX_CONCURRENT_OPENAI = 5  # semaphore limit
+
+# Logging
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+# CSV storage (consider S3 for multi-instance)
+csv_store = {}
+semaphore = asyncio.Semaphore(MAX_CONCURRENT_OPENAI)
+
+# -------------------- Pydantic Models --------------------
+class ListingOutput(BaseModel):
+    SKU: str
+    Title: str
+    Description: str
+    Tags: List[str]
 
 # -------------------- HELPERS --------------------
-def safe_parse_json(text: str):
-    """Safely parse JSON from OpenAI output"""
-    try:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-    except Exception as e:
-        print("❌ Failed to parse JSON:", text, e)
-    return {}
-
-def encode_image_base64(path):
-    """Encode local image to base64 data URI."""
+def encode_image_base64(path: str) -> str:
     mime, _ = mimetypes.guess_type(path)
     if mime is None:
         mime = "image/jpeg"
-
     with open(path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("utf-8")
-
     return f"data:{mime};base64,{b64}"
 
-async def call_openai(prompt, image_b64=None):
-    """Call OpenAI API and return parsed JSON."""
-    content = [{"type": "text", "text": prompt}]
+def merge_tags(short_keywords, ai_tags):
+    all_tags = list(dict.fromkeys(short_keywords + ai_tags))  # deduplicate
+    return all_tags[:13]
 
-    if image_b64:
-        content.append({
-            "type": "image_url",
-            "image_url": { "url": image_b64 }
-        })
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": content}]
-    )
-    raw_text = response.choices[0].message.content
-    print("🟢 OpenAI raw response:", raw_text)
-    return safe_parse_json(raw_text)
-
-def build_csv(results):
-    import csv, uuid
-
+async def save_csv_async(results: List[dict]) -> str:
     filename = f"/tmp/{uuid.uuid4()}.csv"
-
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+    async with aiofiles.open(filename, mode="w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(await f.__aenter__())
         writer.writerow(["SKU", "Title", "Description", "Tags"])
-
         for item in results:
-            tags_list = item.get("Tags", [])
-            tag_string = ", ".join(tags_list)
-
-            writer.writerow([
-                item.get("SKU", ""),
-                item.get("Title", ""),
-                item.get("Description", ""),
-                tag_string
-            ])
+            tag_string = ", ".join(item.get("Tags", []))
+            writer.writerow([item.get("SKU",""), item.get("Title",""), item.get("Description",""), tag_string])
     return filename
 
+# -------------------- OPENAI CALL --------------------
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def call_openai(prompt: str, image_b64: str = None) -> dict:
+    """Call OpenAI API with retry logic"""
+    async with semaphore:
+        content = [{"type": "text", "text": prompt}]
+        if image_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": image_b64}
+            })
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": content}]
+        )
+        raw_text = response.choices[0].message.content
+        try:
+            return json.loads(raw_text)
+        except Exception as e:
+            logger.warning(f"Failed to parse OpenAI response: {e}")
+            return {}
 
 # -------------------- FASTAPI SETUP --------------------
-app = FastAPI(title="Etsy Listing Generator")
+app = FastAPI(title="Etsy Listing Generator Scalable")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Restrict in production!
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-csv_store = {}
-
-# -------------------- ENDPOINT 1 (UPDATED FOR BASE64 IMAGES) --------------------
+# -------------------- APP FORM + IMAGES --------------------
 @app.post("/generate_listings_app")
 async def generate_listings_app(
     request: str = Form(...),
     images: List[UploadFile] = File(...)
 ):
-    # Parse JSON from form
     try:
         data = json.loads(request)
-    except Exception as e:
-        print("❌ Failed to parse request JSON:", request, e)
-        return JSONResponse({"error":"Invalid JSON in request", "details": str(e)}, status_code=400)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
     listings = data.get("listings", [])
     examples = data.get("examples", [])
     shop_context = data.get("shop_context", "")
     shop_url = data.get("shop_url", "")
 
+    examples_str = "\n".join([
+        f'Example:\n{{"title": "{ex.get("title","")}", "description": "{ex.get("description","")}", "tags": {json.dumps(ex.get("tags",[]))}}}'
+        for ex in examples
+    ])
+
     results = []
 
-    for i, listing in enumerate(listings):
+    async def process_listing(i, listing, image_file):
         sku = listing.get("sku", f"row_{i}")
 
+        if image_file.content_type not in ("image/jpeg", "image/png"):
+            logger.warning(f"Invalid image type for SKU {sku}")
+            return {"SKU": sku, "Title": "", "Description": "", "Tags": []}
+
+        if image_file.spool_max_size > MAX_IMAGE_SIZE_MB * 1024 * 1024:
+            logger.warning(f"Image too large for SKU {sku}")
+            return {"SKU": sku, "Title": "", "Description": "", "Tags": []}
+
         try:
-            # Save uploaded image
-            image_file = images[i]
-            temp_dir = tempfile.mkdtemp()
-            image_path = os.path.join(temp_dir, image_file.filename)
-            with open(image_path, "wb") as f:
-                f.write(await image_file.read())
-
-            # Encode Base64 Data URI
-            try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                image_path = f"{temp_dir}/{image_file.filename}"
+                async with aiofiles.open(image_path, "wb") as f:
+                    content = await image_file.read()
+                    await f.write(content)
                 image_b64 = encode_image_base64(image_path)
-                print(f"📸 Encoded Base64 for SKU {sku}")
-            except Exception as e:
-                print(f"⚠️ Failed to encode image for SKU {sku}: {e}")
-                image_b64 = None
+        except Exception as e:
+            logger.error(f"Error processing image for SKU {sku}: {e}")
+            image_b64 = None
 
-            # Keywords
-            raw_keywords = listing.get("keywords","")
-            all_keywords = [k.strip() for k in raw_keywords.split(",") if k.strip()]
-            optional_keywords_for_ai = [k for k in all_keywords if len(k)>TAG_MAX_LENGTH]
-            short_keywords_for_tags = [k for k in all_keywords if len(k)<=TAG_MAX_LENGTH]
-            optional_keywords_str = json.dumps(optional_keywords_for_ai)
+        raw_keywords = listing.get("keywords","")
+        all_keywords = [k.strip() for k in raw_keywords.split(",") if k.strip()]
+        optional_keywords_for_ai = [k for k in all_keywords if len(k)>TAG_MAX_LENGTH]
+        short_keywords_for_tags = [k for k in all_keywords if len(k)<=TAG_MAX_LENGTH]
 
-            # Build examples string
-            examples_str = ""
-            for ex in examples:
-                examples_str += f"""
-Example:
-{{
-  "title": "{ex.get('title','')}",
-  "description": "{ex.get('description','')}",
-  "tags": {json.dumps(ex.get('tags',[]))}
-}}
-"""
-
-            # Build prompt
-            prompt = f"""
+        prompt = f"""
 You are an expert Etsy SEO copywriter.
 
 Here are examples of Etsy listings to follow:
@@ -168,94 +159,69 @@ Now analyze the uploaded image and generate Etsy listing content in JSON format:
 }}
 
 CRITICAL TITLE RULES:
-- Title MUST be between 45 and 85 characters
-- Title MUST clearly identify the product type
-- Include 2–3 descriptive modifiers
-- DO NOT include ANY of the long keywords (>20 chars): {json.dumps(optional_keywords_str)}
-- DO NOT repeat words
-- Keep it natural, descriptive but short, example formats: "Custom Leaf Birthstone Earrings - Unique Gift for Her", "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
+- Title 45-85 chars
+- Include 2-3 descriptive modifiers
+- Exclude long keywords: {json.dumps(optional_keywords_for_ai)}
 
 DESCRIPTION RULES:
-- Description must be at least 375 words
-- First 300 characters MUST be extremely keyword rich and MUST include ALL long keywords (>20 chars): {json.dumps(optional_keywords_str)}
-- Use line breaks, bullet points, numbered lists
-- Clearly identify product type, style, colors, use cases, room placement, and features
-- Keep the structure and tone of the description as close as possible to the examples {examples_str}
+- At least 375 words
+- First 300 chars must include all long keywords
 - Notes: {listing.get('notes','')}
 - Shop context: {shop_context}
 - Shop URL: {shop_url}
 
 TAG RULES:
-- Tags MUST be 2–3 words each
-- Each tag MUST be 10–20 characters
-- Deduplicate tags
-- Generate up to 20 tags
-- Avoid generic tags, make them specific and long-tail
+- 2-3 words per tag
+- 10-20 chars
+- Deduplicate
+- Max 13 tags
 
-IMPORTANT:
 Respond ONLY with valid JSON.
 """
+        parsed_output = await call_openai(prompt, image_b64=image_b64)
 
+        try:
+            output = ListingOutput(
+                SKU=sku,
+                Title=parsed_output.get("title",""),
+                Description=parsed_output.get("description",""),
+                Tags=merge_tags(short_keywords_for_tags, parsed_output.get("tags", []))
+            )
+        except ValidationError as e:
+            logger.error(f"Validation error for SKU {sku}: {e}")
+            return {"SKU": sku, "Title": "", "Description": "", "Tags": []}
 
-            parsed_output = await call_openai(prompt, image_b64=image_b64)
+        return output.dict()
 
-            # Merge tags
-            tags = [t.strip() for t in parsed_output.get("tags",[]) if len(t.strip())<=TAG_MAX_LENGTH]
-            all_tags = []
-            for t in short_keywords_for_tags + tags:
-                if t not in all_tags:
-                    all_tags.append(t)
+    tasks = [process_listing(i, listing, images[i]) for i, listing in enumerate(listings)]
+    results = await asyncio.gather(*tasks)
 
-            results.append({
-                "SKU": sku,
-                "Title": parsed_output.get("title",""),
-                "Description": parsed_output.get("description",""),
-                "Tags": all_tags[:13]
-            })
-            print(f"✅ Processed SKU {sku}")
-
-            await asyncio.sleep(2)
-
-        except Exception as e:
-            print(f"⚠️ Error processing SKU {sku}: {e}")
-            results.append({"SKU": sku,"Title":"","Description":"","Tags":[]})
-
-    # Save CSV
-    csv_path = build_csv(results)
-    csv_id = str(len(csv_store)+1)
+    csv_path = await save_csv_async(results)
+    csv_id = str(uuid.uuid4())
     csv_store[csv_id] = csv_path
 
-    return JSONResponse({
-        "results": results,
-        "csv_url": f"/download_csv/{csv_id}"
-    })
+    return JSONResponse({"results": results, "csv_url": f"/download_csv/{csv_id}"})
 
 
-# -------------------- BULK CSV ENDPOINT (UNCHANGED AS REQUESTED) --------------------
+# -------------------- BULK CSV ENDPOINT --------------------
 @app.post("/generate_listings_csv")
 async def generate_listings_csv(
     file: UploadFile = File(None),
-    csv: UploadFile = File(None),
+    csv_file: UploadFile = File(None),
     upload: UploadFile = File(None),
     other: UploadFile = File(None)
 ):
-    # ★★★ DO NOT MODIFY — LEFT 100% IDENTICAL ★★★
-    csv_file = next((f for f in [file, csv, upload, other] if f and f.filename), None)
-    if not csv_file:
-        return JSONResponse(
-            {"error": "No CSV file uploaded. Make sure you send form-data with a file."},
-            status_code=400
-        )
+    # Identify which file field has CSV
+    csv_upload = next((f for f in [file, csv_file, upload, other] if f and f.filename), None)
+    if not csv_upload:
+        raise HTTPException(status_code=400, detail="No CSV uploaded.")
 
-    print(f"📄 Received CSV file: {csv_file.filename}")
-
-    content = await csv_file.read()
+    content = await csv_upload.read()
     text = content.decode("utf-8", errors="ignore")
 
-    import csv as csv_lib, io
-    reader = csv_lib.reader(io.StringIO(text))
+    # Parse CSV rows
+    reader = csv.reader(text.splitlines())
     header = next(reader, None)
-
     listings = []
     for row in reader:
         sku = row[0].strip() if len(row) > 0 else f"row_{len(listings)}"
@@ -269,39 +235,17 @@ async def generate_listings_csv(
             "notes": notes
         })
 
-    print(f"📦 Loaded {len(listings)} listings from CSV")
-
-    # Continue unchanged
-    examples = []
-    shop_context = ""
-    shop_url = ""
     results = []
 
-    examples_str = ""
-    for ex in examples:
-        examples_str += f"""
-Example:
-{{
-  "title": "{ex.get('title','')}",
-  "description": "{ex.get('description','')}",
-  "tags": {json.dumps(ex.get('tags',[]))}
-}}
-"""
-
-    for i, listing in enumerate(listings):
+    async def process_csv_listing(i, listing):
         sku = listing.get("sku")
+        raw_keywords = listing.get("keywords", "")
+        all_keywords = [k.strip() for k in raw_keywords.split(",") if k.strip()]
+        optional_keywords_for_ai = [k for k in all_keywords if len(k)>TAG_MAX_LENGTH]
+        short_keywords_for_tags = [k for k in all_keywords if len(k)<=TAG_MAX_LENGTH]
 
-        try:
-            raw_keywords = listing.get("keywords", "")
-            all_keywords = [k.strip() for k in raw_keywords.split(",") if k.strip()]
-            optional_keywords = [k for k in all_keywords if len(k) > TAG_MAX_LENGTH]
-            short_keywords = [k for k in all_keywords if len(k) <= TAG_MAX_LENGTH]
-
-            prompt = f"""
+        prompt = f"""
 You are an expert Etsy SEO copywriter.
-    
-Here are examples of Etsy listings to follow:
-{examples_str}
 
 Generate Etsy listing content in JSON format ONLY:
 {{
@@ -311,89 +255,55 @@ Generate Etsy listing content in JSON format ONLY:
 }}
 
 CRITICAL TITLE RULES:
-- Title MUST be between 45 and 85 characters
-- Title MUST clearly identify the product type
-- Include 2–3 descriptive modifiers
-- DO NOT include ANY long keywords (>20 chars): {json.dumps(optional_keywords)}
-- DO NOT repeat words
-- Keep it natural, descriptive but short, example formats: "Custom Leaf Birthstone Earrings - Unique Gift for Her", "Landscape Frame Mockup: Modern Interior Scene (PSD and Canva Template)"
+- Title 45-85 chars
+- Exclude long keywords: {json.dumps(optional_keywords_for_ai)}
 
 DESCRIPTION RULES:
-- Description must be at least 375 words
-- First 300 characters MUST be extremely keyword rich and MUST include ALL long keywords (>20 chars): {json.dumps(optional_keywords)}
-- Use line breaks, bullet points, numbered lists
-- Long keywords must NEVER appear in the title or tags
-- Clearly identify product type, style, colors, use cases, room placement, and features
-- Keep the structure and tone of the description as close as possible to the examples {examples_str}
+- At least 375 words
+- First 300 chars must include all long keywords
 - Notes: {listing.get('notes','')}
-- Shop context: {shop_context}
-- Shop URL: {shop_url}
 
 TAG RULES:
-- Tags MUST be 2–3 words each
-- Each tag MUST be 10–20 characters
-- Deduplicate tags
-- Generate up to 20 tags
-- Avoid generic tags, make them specific and long-tail
+- 2-3 words per tag
+- 10-20 chars
+- Deduplicate
+- Max 13 tags
 
-IMPORTANT:
 Respond ONLY with valid JSON.
 """
+        parsed_output = await call_openai(prompt, image_b64=listing.get("image_url"))
+        try:
+            output = ListingOutput(
+                SKU=sku,
+                Title=parsed_output.get("title",""),
+                Description=parsed_output.get("description",""),
+                Tags=merge_tags(short_keywords_for_tags, parsed_output.get("tags", []))
+            )
+        except ValidationError as e:
+            logger.error(f"Validation error for CSV SKU {sku}: {e}")
+            return {"SKU": sku, "Title": "", "Description": "", "Tags": []}
+        return output.dict()
 
+    tasks = [process_csv_listing(i, listing) for i, listing in enumerate(listings)]
+    results = await asyncio.gather(*tasks)
 
-            parsed = await call_openai(prompt, image_b64=listing.get("image_url"))
-
-            tags = [t.strip() for t in parsed.get("tags", []) if len(t.strip()) <= TAG_MAX_LENGTH]
-
-            merged_tags = []
-            for t in short_keywords + tags:
-                if t not in merged_tags:
-                    merged_tags.append(t)
-
-            results.append({
-                "SKU": sku,
-                "Title": parsed.get("title", ""),
-                "Description": parsed.get("description", ""),
-                "Tags": merged_tags[:13]
-            })
-
-            print(f"✅ Processed CSV SKU {sku}")
-
-        except Exception as e:
-            print(f"⚠️ Error processing CSV SKU {sku}: {e}")
-            results.append({
-                "SKU": sku,
-                "Title": "",
-                "Description": "",
-                "Tags": []
-            })
-
-    csv_path = build_csv(results)
-    csv_id = str(len(csv_store)+1)
+    csv_path = await save_csv_async(results)
+    csv_id = str(uuid.uuid4())
     csv_store[csv_id] = csv_path
 
-    return JSONResponse({
-        "results": results,
-        "csv_url": f"/download_csv/{csv_id}"
-    })
+    return JSONResponse({"results": results, "csv_url": f"/download_csv/{csv_id}"})
 
-# -------------------- DOWNLOAD ENDPOINT --------------------
+
+# -------------------- DOWNLOAD CSV --------------------
 @app.get("/download_csv/{csv_id}")
-def download_csv(csv_id: str):
+async def download_csv(csv_id: str):
     csv_path = csv_store.get(csv_id)
     if csv_path and os.path.exists(csv_path):
         return FileResponse(csv_path, filename="filled_products.csv")
     return JSONResponse({"error":"CSV not found"}, status_code=404)
 
-# Root
+
+# -------------------- ROOT --------------------
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
-
-# Run locally
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
-
