@@ -82,11 +82,12 @@ async def call_openai(prompt: str, image_b64: str = None) -> dict:
                 "image_url": {"url": image_b64}
             })
 
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": content}]
         )
         raw_text = response.choices[0].message.content
+        raw_text = raw_text.strip().strip("```json").strip("```")
         try:
             return json.loads(raw_text)
         except Exception as e:
@@ -319,6 +320,7 @@ async def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
 
 
 
