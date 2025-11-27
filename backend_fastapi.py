@@ -72,27 +72,22 @@ async def save_csv_async(results: List[dict]) -> str:
 
 # -------------------- OPENAI CALL --------------------
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-async def call_openai(prompt: str, image_b64: str = None) -> dict:
+async def call_openai(prompt: str) -> dict:
     """Call OpenAI API with retry logic"""
     async with semaphore:
-        content = [{"type": "text", "text": prompt}]
-        if image_b64:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": image_b64}
-            })
-
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": content}]
-        )
-        raw_text = response.choices[0].message.content
-        raw_text = raw_text.strip().strip("```json").strip("```")
         try:
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw_text = response.choices[0].message.content
+            raw_text = raw_text.strip().strip("```json").strip("```")
             return json.loads(raw_text)
         except Exception as e:
-            logger.warning(f"Failed to parse OpenAI response: {e}")
+            logger.warning(f"Failed to call OpenAI: {e}")
             return {}
+
 
 # -------------------- FASTAPI SETUP --------------------
 app = FastAPI(title="Etsy Listing Generator Scalable")
@@ -320,6 +315,7 @@ async def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
 
 
 
