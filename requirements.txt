@@ -7,5 +7,7 @@ pydantic
 Pillow
 requests
 openai>=1.0.0
+aiofiles>=23.1.0
+
 
 
