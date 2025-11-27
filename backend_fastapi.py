@@ -72,22 +72,39 @@ async def save_csv_async(results: List[dict]) -> str:
 
 # -------------------- OPENAI CALL --------------------
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-async def call_openai(prompt: str) -> dict:
-    """Call OpenAI API with retry logic"""
+async def call_openai(prompt: str, image_b64: str = None) -> dict:
+    """
+    Call OpenAI API with retry logic.
+    Supports optional base64 image by appending to prompt.
+    """
     async with semaphore:
         try:
+            # Append image info to prompt if available
+            full_prompt = prompt
+            if image_b64:
+                # For now, just include as info in prompt
+                # Later you can switch to a true multimodal call if SDK supports
+                full_prompt += f"\n[An image is provided in base64 format: {image_b64[:100]}...]"  # show only first 100 chars
+            
+            # Run the blocking SDK call in a separate thread
             response = await asyncio.to_thread(
                 client.chat.completions.create,
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": full_prompt}]
             )
+
             raw_text = response.choices[0].message.content
             raw_text = raw_text.strip().strip("```json").strip("```")
-            return json.loads(raw_text)
+
+            try:
+                return json.loads(raw_text)
+            except Exception as e:
+                logger.warning(f"Failed to parse OpenAI response: {e}\nRaw: {raw_text}")
+                return {}
+
         except Exception as e:
             logger.warning(f"Failed to call OpenAI: {e}")
             return {}
-
 
 # -------------------- FASTAPI SETUP --------------------
 app = FastAPI(title="Etsy Listing Generator Scalable")
@@ -315,6 +332,7 @@ async def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
 
 
 
