@@ -51,15 +51,23 @@ def encode_image_base64(path: str) -> str:
 def merge_tags(short_keywords, ai_tags):
     all_tags = list(dict.fromkeys(short_keywords + ai_tags))  # deduplicate
     return all_tags[:13]
-
-async def save_csv_async(results: List[dict]) -> str:
-    filename = f"/tmp/{uuid.uuid4()}.csv"
-    async with aiofiles.open(filename, mode="w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(await f.__aenter__())
-        writer.writerow(["SKU", "Title", "Description", "Tags"])
+    async def save_csv_async(results: List[dict]) -> str:
+        filename = f"/tmp/{uuid.uuid4()}.csv"
+        async with aiofiles.open(filename, mode="w", encoding="utf-8") as f:
+        # Write header
+        await f.write("SKU,Title,Description,Tags\n")
+    
+        # Write each row
         for item in results:
-            tag_string = ", ".join(item.get("Tags", []))
-            writer.writerow([item.get("SKU",""), item.get("Title",""), item.get("Description",""), tag_string])
+            tag_string = ", ".join(item.get("Tags", []))  # same format you used
+            line = (
+                f"{item.get('SKU','')},"
+                f"{item.get('Title','')},"
+                f"{item.get('Description','')},"
+                f"{tag_string}\n"
+            )
+            await f.write(line)
+    
     return filename
 
 # -------------------- OPENAI CALL --------------------
@@ -311,5 +319,6 @@ async def download_csv(csv_id: str):
 @app.get("/")
 def root():
     return {"message":"Etsy Listing Generator backend is running!"}
+
 
 
