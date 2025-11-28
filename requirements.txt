@@ -9,6 +9,9 @@ requests
 openai>=1.0.0
 aiofiles>=23.1.0
 tenacity>=8.2.2
+boto3
+requests
+
 
 
 
