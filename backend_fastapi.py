@@ -147,7 +147,7 @@ Respond ONLY with valid JSON. Do not include any markdown formatting or code blo
 """
 
 async def upload_csv_to_s3(csv_content: str, csv_id: str) -> str:
-    """Upload CSV string to S3 and return the URL."""
+    """Upload CSV to S3 and return presigned download URL."""
     try:
         key = f"csvs/{csv_id}.csv"
         s3_client.put_object(
@@ -156,8 +156,15 @@ async def upload_csv_to_s3(csv_content: str, csv_id: str) -> str:
             Body=csv_content.encode("utf-8"),
             ContentType="text/csv"
         )
-        # Return S3 URL
-        return f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
+        
+        # Generate presigned URL (expires in 1 hour)
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': S3_BUCKET, 'Key': key},
+            ExpiresIn=3600  # 1 hour
+        )
+        return presigned_url
+        
     except ClientError as e:
         logger.error(f"Failed to upload CSV to S3: {e}")
         raise HTTPException(status_code=500, detail="Failed to save CSV")
@@ -505,3 +512,4 @@ async def generate_listings_csv(
 @app.get("/")
 def root():
     return {"message": "Etsy Listing Generator backend is running!", "version": "2.0"}
+
