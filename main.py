@@ -7,19 +7,16 @@ app = FastAPI(title="Etsy Listing Generator API")
 
 # ---------------- CORS Configuration ----------------
 origins = [
-    "https://c08091be-56b2-4932-bf23-98ce122b41e1.lovableproject.com",  # frontend domain
-    "http://localhost:5173",  # local dev
+    "https://c08091be-56b2-4932-bf23-98ce122b41e1.lovableproject.com",
+    "https://id-preview--c08091be-56b2-4932-bf23-98ce122b41e1.lovable.app",
+    "https://id--c08091be-56b2-4932-bf23-98ce122b41e1.lovable.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-    "https://id-preview--c08091be-56b2-4932-bf23-98ce122b41e1.lovable.app",
-    "https://id--c08091be-56b2-4932-bf23-98ce122b41e1.lovable.app",
-    "https://esy-listing-generator.onrender.com",
-    "http://localhost:3000",
-    "http://localhost:5173",
-],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
