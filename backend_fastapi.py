@@ -9,6 +9,7 @@ import requests
 import logging
 from typing import List, Optional
 from io import StringIO
+from fastapi import APIRouter
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
@@ -20,6 +21,8 @@ import csv
 from tenacity import retry, stop_after_attempt, wait_exponential
 import boto3
 from botocore.exceptions import ClientError
+
+router = APIRouter()
 
 # -------------------- CONFIG --------------------
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -512,4 +515,5 @@ async def generate_listings_csv(
 @app.get("/")
 def root():
     return {"message": "Etsy Listing Generator backend is running!", "version": "2.0"}
+
 
