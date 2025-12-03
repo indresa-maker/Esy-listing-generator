@@ -51,6 +51,11 @@ def analyze_ads_data(df: pd.DataFrame):
         })
     return results
 
+# ---------------- Preflight Endpoint ----------------
+@router.options("/analyze_screenshot")
+async def ads_preflight():
+    return JSONResponse({"status": "ok"})
+    
 # ---------------- Endpoint ----------------
 @router.post("/analyze_screenshot")
 async def analyze_etsy_ads_screenshot(
