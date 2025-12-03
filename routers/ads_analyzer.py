@@ -1,6 +1,5 @@
 # ads_analyzer.py
 import base64
-import io
 from fastapi import APIRouter, UploadFile, Form
 from fastapi.responses import JSONResponse
 from openai import OpenAI
@@ -12,25 +11,19 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # ---------------- Helper Functions ----------------
 def image_to_base64(file: UploadFile) -> str:
-    """Convert uploaded image to base64 string"""
     content = file.file.read()
-    encoded = base64.b64encode(content).decode("utf-8")
-    return encoded
+    return base64.b64encode(content).decode("utf-8")
 
 def analyze_ads_data(df: pd.DataFrame):
-    """Analyze ad performance using CTR, CVR, ROAS, Revenue vs Spend."""
     df = df.copy()
-    # Ensure numeric types
     numeric_cols = ['views','clicks','click_rate','orders','revenue','spend','ROAS']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    # Derived metrics
     df['CVR'] = df.apply(lambda row: (row['orders']/row['clicks']*100) if row['clicks']>0 else 0, axis=1)
     
     results = []
     for _, row in df.iterrows():
-        rec = ""
-        commentary = ""
+        rec, commentary = "", ""
         if row['ROAS'] >= 2 and row['click_rate'] >= 1 and row['CVR'] >= 3 and row['revenue'] > row['spend']:
             rec = "KEEP"
             commentary = "Profitable and performing well."
@@ -65,13 +58,7 @@ async def analyze_etsy_ads_screenshot(
     image_base64: str = Form(None),
     strategy: str = Form("balanced")
 ):
-    """
-    Analyze Etsy Ads screenshot:
-    - GPT extracts tabular ad data
-    - Python analyzes ad performance
-    """
     try:
-        # Get base64 string
         if file:
             image_b64 = image_to_base64(file)
         elif image_base64:
@@ -79,7 +66,7 @@ async def analyze_etsy_ads_screenshot(
         else:
             return JSONResponse({"error": "No image provided"}, status_code=400)
 
-        # Step 1: Extract ad table from screenshot using GPT
+        # GPT step
         system_prompt = """
 You are an AI assistant specialized in reading Etsy Ads dashboard screenshots.
 Extract all visible ad rows into a structured table with columns:
@@ -88,10 +75,7 @@ Return JSON array of ads in the same order as they appear in the screenshot.
 If numbers are unclear, estimate reasonably and indicate in notes.
 Respond ONLY in valid JSON.
 """
-        user_prompt = f"""
-Etsy Ads screenshot in base64:
-{image_b64}
-"""
+        user_prompt = f"Etsy Ads screenshot in base64:\n{image_b64}"
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -104,21 +88,15 @@ Etsy Ads screenshot in base64:
             ],
         )
 
-        raw_json = response.choices[0].message.content
-        # Parse GPT JSON
         import json
         try:
-            ad_data = json.loads(raw_json)
-        except Exception as e:
-            return JSONResponse({"error": "Failed to parse GPT output", "raw_output": raw_json}, status_code=500)
+            ad_data = json.loads(response.choices[0].message.content)
+        except Exception:
+            return JSONResponse({"error": "Failed to parse GPT output", "raw_output": response.choices[0].message.content}, status_code=500)
 
-        # Step 2: Analyze ads with Python logic
         df = pd.DataFrame(ad_data)
         analyzed_results = analyze_ads_data(df)
-
-        return JSONResponse({
-            "results": analyzed_results
-        })
+        return JSONResponse({"results": analyzed_results})
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
