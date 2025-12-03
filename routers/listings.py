@@ -23,7 +23,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 router = APIRouter()
-
+# test change
 # -------------------- CONFIG --------------------
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
@@ -515,5 +515,6 @@ async def generate_listings_csv(
 @app.get("/")
 def root():
     return {"message": "Etsy Listing Generator backend is running!", "version": "2.0"}
+
 
 
