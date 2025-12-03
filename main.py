@@ -13,7 +13,13 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+    "https://id-preview--c08091be-56b2-4932-bf23-98ce122b41e1.lovable.app",
+    "https://id--c08091be-56b2-4932-bf23-98ce122b41e1.lovable.app",
+    "https://esy-listing-generator.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:5173",
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
