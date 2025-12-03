@@ -4,7 +4,7 @@ from routers import listings, ads_analyzer
 app = FastAPI(title="Etsy Tools Backend")
 
 # Include routers
-app.include_router(backend_fastapi.router, prefix="/listings")
+app.include_router(listings.router, prefix="/listings")
 app.include_router(ads_analyzer.router, prefix="/ads")
 
 @app.get("/")
